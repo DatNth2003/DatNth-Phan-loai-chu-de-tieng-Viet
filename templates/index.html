@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trợ Lý Phân Loại Chủ Đề PhoBERT</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.2.0/css/all.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <script src="https://cdn.plot.ly/plotly-2.24.1.min.js" charset="utf-8"></script>
+</head>
+<body>
+    <div class="container-main col-lg-11 col-xl-10">
+        <div class="app-header text-center">
+            <h1><i class="fas fa-brain"></i>Hệ thống phân loại chủ đề PhoBERT</h1>
+            <p class="lead">Phân tích và nhận diện chủ đề văn bản tiếng Việt nhanh chóng và thông minh!</p>
+        </div>
+
+        <p class="app-description">
+            <i class="fas fa-info-circle"></i> Cung cấp văn bản cho tôi qua URL, nhập trực tiếp, hoặc tải file lên. Tôi sẽ phân tích, xác định chủ đề và giúp bạn hiểu cách mô hình tập trung sự chú ý (attention) vào các từ ngữ quan trọng trong quá trình dự đoán!
+        </p>
+
+        <div class="labels-section">
+            <h5><i class="fas fa-tags"></i>Các chủ đề có thể nhận diện:</h5>
+            {% if label_map and label_map|length > 0 and label_map[0] != "Lỗi_Tải_Nhãn" %}
+                <div class="row row-cols-2 row-cols-sm-3 row-cols-md-4 g-2">
+                    {% for label_name in label_map %}
+                    <div class="col"><div class="label-item-display d-flex align-items-center"><i class="fas fa-check-circle me-2 text-success"></i>{{ label_name }}</div></div>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <p class="text-muted text-center"><em><i class="fas fa-spinner fa-spin me-2"></i>Đang tải danh sách nhãn chủ đề...</em></p>
+            {% endif %}
+        </div>
+        
+        <div class="row mt-4 gx-lg-5">
+            <div class="col-lg-7" id="form-column">
+                <div class="btn-group mb-4 btn-mode-group d-flex shadow-sm" role="group">
+                    <button type="button" class="btn" data-mode="url"><i class="fas fa-link"></i>Từ URL</button>
+                    <button type="button" class="btn" data-mode="text"><i class="fas fa-keyboard"></i>Nhập nội dung</button>
+                    <button type="button" class="btn" data-mode="file"><i class="fas fa-file-upload"></i>Tải File</button>
+                </div>
+                
+                <form id="classifyForm" method="POST" 
+                      action="{{ url_for('classify_route') }}#resultsArea" 
+                      enctype="multipart/form-data"
+                      data-visualize-url="{{ url_for('visualize_attention_route_phobert') }}"
+                      data-no-chunk-token-limit="{{ NO_CHUNK_TOKEN_LIMIT }}"
+                      data-chunk-size="{{ CHUNK_SIZE }}"
+                      data-model-max-len="{{ MODEL_MAX_LEN }}"
+                      data-default-strategy="{{ DEFAULT_STRATEGY }}">
+                    <input type="hidden" name="active_input_mode" id="active_input_mode_field" value="{{ current_input_mode or 'url' }}">
+                    
+                    <div id="urlInputContainer" class="input-mode-content input-section-container">
+                        <div class="mb-3">
+                            <label for="url_input_id" class="form-label">Liên kết URL bài báo:</label>
+                            <input type="text" class="form-control" id="url_input_id" name="url" placeholder="Ví dụ: https://vnexpress.net/bai-bao-moi.html" value="{{ url_input_value or '' }}">
+                        </div>
+                    </div>
+
+                    <div id="textInputContainer" class="input-mode-content input-section-container">
+                        <div class="mb-3">
+                            <label for="text_title_input_id" class="form-label">Tiêu đề (nếu có):</label>
+                            <input type="text" class="form-control" id="text_title_input_id" name="text_title" placeholder="Nhập tiêu đề văn bản..." value="{{ text_title_value or '' }}">
+                        </div>
+                        <div class="mb-3">
+                            <label for="text_input_id" class="form-label">Nội dung cần phân loại:</label>
+                            <textarea class="form-control" id="text_input_id" name="text" rows="5" placeholder="Dán hoặc nhập nội dung tại đây...">{{ text_input_value or '' }}</textarea>
+                        </div>
+                    </div>
+
+                    <div id="fileInputContainer" class="input-mode-content input-section-container">
+                        <div class="mb-3">
+                            <label for="file_input_id" class="form-label">Chọn file từ máy tính của bạn:</label>
+                            <small class="form-text text-muted">Hỗ trợ các định dạng: .txt, .csv, .json, .xlsx, .xls (UTF-8).</small>
+                            <input type="file" class="form-control" id="file_input_id" name="file_input" accept=".txt,.csv,.json,.xlsx,.xls">
+                        </div>
+                    </div>
+
+                    <div class="options-section mt-4">
+                        <h4 class="mb-3">
+                            <a href="#collapseOptions" data-bs-toggle="collapse" role="button" aria-expanded="false" aria-controls="collapseOptions" class="text-decoration-none">
+                                <i class="fas fa-cogs"></i> Tùy chọn nâng cao <i class="fas fa-chevron-down small ps-1"></i>
+                            </a>
+                        </h4>
+                        <div class="collapse" id="collapseOptions">
+                            <div class="mb-3">
+                                <label for="chunk_strategy_select" class="form-label">Chiến lược xử lý văn bản dài:</label>
+                                <select class="form-select form-select-sm" id="chunk_strategy_select" name="chunk_strategy">
+                                    <option value="no_chunking">Không chia nhỏ (nhanh, < {{NO_CHUNK_TOKEN_LIMIT}} token)</option>
+                                    <option value="sum_logits">Cộng gộp logits (khuyến nghị)</option>
+                                    <option value="mean_probabilities">Trung bình xác suất</option>
+                                    <option value="max_probability">Xác suất cao nhất từ chunk</option>
+                                    <option value="first_chunk">Chỉ chunk đầu tiên (rất nhanh)</option>
+                                    <option value="majority_vote">Bỏ phiếu đa số từ các chunk</option>
+                                </select>
+                                <small class="form-text text-muted mt-1" id="strategyDescription">Mô tả chi tiết của chiến lược sẽ hiển thị ở đây.</small>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <button type="submit" id="submitButton" class="btn btn-primary btn-lg btn-submit-custom mt-3 mb-4"><i class="fas fa-paper-plane"></i>Phân loại ngay</button>
+                </form>
+            </div>
+
+            <div class="col-lg-5" id="results-column">
+                {% if results or (request.method == 'POST' and (article_title and article_title != "Chưa có nội dung" and article_title != "Không có tiêu đề" and not article_title.startswith("Lỗi URL"))) %}
+                <div id="resultsArea" class="results shadow-sm mb-4">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <h3 class="text-primary mb-0"><i class="fas fa-chart-pie"></i>Kết quả phân loại:</h3>
+                        <p id="classificationTimeInfo" class="text-muted small mb-0">
+                            {% if classification_time_ms and classification_time_ms > 0 %}
+                                <i class="fas fa-server"></i> Xử lý: {{ "%.2f"|format(classification_time_ms / 1000) }}s
+                            {% elif processing_time_total_ms and processing_time_total_ms > 0 %}
+                                <i class="fas fa-server"></i> Xử lý: {{ "%.2f"|format(processing_time_total_ms / 1000) }}s
+                            {% endif %}
+                        </p>
+                    </div>
+                    <hr class="my-2"> 
+                    {% if article_title and article_title != "Không có tiêu đề" and not article_title.startswith("Lỗi URL") and not article_title.startswith("File:") %}
+                        <p class="mb-1 result-meta"><strong><i class="far fa-file-alt text-secondary"></i>Nguồn/Tiêu đề:</strong> {{ article_title }}</p>
+                    {% elif article_title and (article_title.startswith("File:") or article_title.startswith("Lỗi URL")) %}
+                         <p class="mb-1 result-meta"><strong><i class="fas fa-info-circle text-warning"></i>Thông tin:</strong> {{ article_title }}</p>
+                    {% endif %}
+
+                    {% if num_tokens is defined and num_tokens > 0 %}
+                    <p class="mb-2 result-meta"><small><i class="fas fa-stream text-secondary"></i>Số token (sau xử lý): <span class="fw-bold text-info">{{ num_tokens }}</span></small></p>
+                    {% endif %}
+                    
+                    {% if processed_text_preview and not file_results_preview %}
+                        <div class="processed-text-section mt-3 mb-3">
+                            <strong>
+                                <a href="#collapseProcessedText" data-bs-toggle="collapse" role="button" aria-expanded="false" aria-controls="collapseProcessedText" class="text-decoration-none text-dark">
+                                    <i class="fas fa-align-left text-secondary"></i>Nội dung đã xử lý (xem trước) <i class="fas fa-chevron-down small ps-1"></i>
+                                </a>
+                            </strong>
+                            <div class="collapse" id="collapseProcessedText">
+                                <pre id="resultProcessedText" class="small mt-2">{{ processed_text_preview }}</pre>
+                            </div>
+                        </div>
+                    {% endif %}
+
+                    <p class="mt-3 mb-2"><strong><i class="fas fa-tasks text-secondary"></i>Dự đoán chủ đề:</strong></p>
+                    <div id="resultPredictionsDisplay">
+                        {% if results and results.loi %}
+                            <div class="alert alert-danger d-flex align-items-center mt-2" role="alert"><i class="fas fa-times-circle"></i>Lỗi: {{ results.loi }}</div>
+                        {% elif results and results.loi_model %}
+                            <div class="alert alert-danger d-flex align-items-center mt-2" role="alert"><i class="fas fa-times-circle"></i>Lỗi Model: {{ results.loi_model }}</div>
+                        {% elif results and results.thong_bao %}
+                            <div class="alert alert-info d-flex align-items-center mt-2" role="alert"><i class="fas fa-info-circle"></i>Thông báo: {{ results.thong_bao }}</div>
+                        {% elif results and not file_results_preview %}
+                            {% for label, score in results.items() %}
+                            <div class="prediction-item mb-2">
+                                <span class="prediction-label">{{ label }}</span>
+                                <div class="progress" role="progressbar" aria-valuenow="{{ (score * 100) }}" aria-valuemin="0" aria-valuemax="100" style="height: 25px;">
+                                    <div class="progress-bar fw-bold" style="width: {{ "%.2f"|format(score * 100) }}%;">{{ "%.1f"|format(score * 100) }}%</div>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        {% elif file_results_preview and file_results_preview|length > 0 %}
+                            <p class="mb-1 small">Tóm tắt kết quả từ file:</p>
+                            <div class="table-responsive" style="max-height: 280px; overflow-y: auto;">
+                                <table class="table table-sm table-striped table-hover table-bordered">
+                                    <thead class="table-light" style="position: sticky; top: 0; z-index: 1;"><tr><th>Văn bản (tóm tắt)</th><th>Chủ đề</th></tr></thead>
+                                    <tbody>
+                                        {% for item in file_results_preview %}
+                                        <tr><td><small>{{ item.original_text }}</small></td><td><small>{{ item.predicted_label }}</small></td></tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        {% else %}
+                             <div class="alert alert-secondary mt-2" role="alert"><i class="far fa-meh"></i>Không có dự đoán nào.</div>
+                        {% endif %}
+                    </div>
+
+                    {% if temporary_report_id and current_input_mode != 'file' and results and not (results.loi or results.thong_bao or results.loi_model) %}
+                        <div class="mt-4 pt-3 border-top text-center report-download-section">
+                            <p class="mb-2 small text-muted">Tải báo cáo chi tiết phân tích:</p>
+                            <a href="{{ url_for('download_url_report', report_guid=temporary_report_id, format='detail') }}" class="btn btn-sm btn-outline-primary mb-1 mx-1" title="Tải file: Tiêu đề, Nội dung đã xử lý, Kết quả dự đoán"><i class="fas fa-file-alt me-1"></i>Chi tiết</a>
+                            <a href="{{ url_for('download_url_report', report_guid=temporary_report_id, format='original') }}" class="btn btn-sm btn-outline-secondary mb-1 mx-1" title="Tải file: Toàn bộ văn bản gốc"><i class="fas fa-file-word me-1"></i>Văn bản Gốc</a>
+                            <a href="{{ url_for('download_url_report', report_guid=temporary_report_id, format='processed') }}" class="btn btn-sm btn-outline-success mb-1 mx-1" title="Tải file: Văn bản đã tiền xử lý"><i class="fas fa-text-width me-1"></i>Đã xử lý</a>
+                        </div>
+                    {% endif %}
+                    
+                    {% if download_filename_id and current_input_mode == 'file' %}
+                        <div class="mt-4 text-center">
+                            <a href="{{ url_for('download_batch_excel', excel_download_key=download_filename_id) }}" class="btn btn-primary"><i class="fas fa-download"></i>Tải kết quả file (.xlsx)</a>
+                        </div>
+                    {% endif %}
+                </div>
+                {% endif %}
+            </div> 
+        </div> 
+
+        <div class="row mt-4">
+            <div class="col-12">
+                <div class="card shadow-sm" id="attentionCard">
+                    <div class="card-header bg-dark text-white">
+                      <i class="fas fa-eye"></i> Trực quan hóa Attention của PhoBERT
+                    </div>
+                    <div class="card-body">
+                        <div class="alert alert-info alert-dismissible fade show small mb-3" role="alert">
+                            <h5 class="alert-heading h6"><i class="fas fa-info-circle"></i> Hướng dẫn xem Attention Heatmap</h5>
+                            <p class="mb-1">Biểu đồ Heatmap tương tác bên dưới thể hiện "sự tập trung" của mô hình vào các cặp từ. Bạn có thể dùng chuột để <strong>kéo chọn vùng zoom</strong>, <strong>nhấn đúp để reset zoom</strong>, và <strong>di chuột qua các ô</strong> để xem chi tiết attention score.</p>
+                            <ul class="mb-1 ps-3" style="list-style-type: disc;">
+                                <li><strong>Layer:</strong> Mô hình có nhiều lớp xử lý (0 đến 11). Layer cuối (-1 hoặc 11) thường nắm bắt thông tin tổng hợp nhất.</li>
+                                <li><strong>Head:</strong> Mỗi layer có nhiều "đầu chú ý" (0 đến 11), mỗi đầu có thể học các kiểu quan hệ khác nhau giữa các từ.</li>
+                            </ul>
+                            <p class="mb-0">Hãy thử nghiệm để khám phá cách mô hình "hiểu" văn bản!</p>
+                            <button type="button" class="btn-close btn-sm" data-bs-dismiss="alert" aria-label="Close"></button>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label small text-muted">Attention cho văn bản đã được phân loại (tối đa <span id="modelMaxLengthTokenDisplay">{{MODEL_MAX_LEN}}</span> token, hiển thị tương tác tối đa <span id="interactiveMaxTokenDisplay">100</span> token):</label>
+                             <p id="attentionSourceTextDisplay" class="form-control-plaintext bg-light p-2 rounded small" style="max-height: 70px; overflow-y: auto; border: 1px solid #e0e0e0;">
+                                  <i>Chưa có văn bản nào được phân loại.</i>
+                             </p>
+                             <input type="hidden" id="hiddenAttentionSourceText" value="{{ text_for_attention_input or '' }}">
+                        </div>
+                        <div class="row mb-2 g-2">
+                            <div class="col-md-6">
+                              <label for="layerPhoBERTSelect" class="form-label small">Chọn Layer:</label>
+                              <select class="form-select form-select-sm" id="layerPhoBERTSelect" name="layer" disabled>
+                                  <option value="-1" selected>Layer cuối (-1)</option>
+                                  {% for i in range(12) %}
+                                    <option value="{{i}}">Layer {{i}}</option>
+                                  {% endfor %}
+                              </select>
+                            </div>
+                            <div class="col-md-6">
+                              <label for="headPhoBERTSelect" class="form-label small">Chọn Head:</label>
+                              <select class="form-select form-select-sm" id="headPhoBERTSelect" name="head" disabled>
+                                  {% for i in range(12) %}
+                                    <option value="{{i}}" {% if i == 0 %}selected{% endif %}>Head {{i}}</option>
+                                  {% endfor %}
+                              </select>
+                            </div>
+                        </div>
+
+                      <div id="attentionPhoBERTResult" class="mt-3 text-center" style="display: none;">
+                        <div class="d-flex justify-content-between align-items-center mb-1">
+                            <p class="text-muted small mb-0"><i class="fas fa-chart-area"></i> Biểu đồ Heatmap Attention:</p>
+                            <p id="attentionTimeInfo" class="text-muted small mb-0"></p>
+                        </div>
+                        <div id="interactiveAttentionHeatmap" style="width:100%; min-height:450px;"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="suggestions-section mt-5 pt-4 border-top">
+            <h4 class="mb-3"><i class="fas fa-lightbulb text-warning"></i>Thử với các gợi ý sau?</h4>
+            <div id="suggestionsList" class="row row-cols-1 row-cols-md-2 g-3">
+                {% if suggested_articles and suggested_articles|length > 0 %}
+                    {% for article in suggested_articles %}
+                    <div class="col">
+                        <div class="suggestion-item-simple shadow-sm" role="button" tabindex="0" 
+                             data-url="{{ article.url }}" data-title="{{ article.title }}" data-description="{{ article.description | default('', true) }}"
+                             title="Nhấn để sử dụng nội dung này làm ví dụ">
+                            <i class="fas fa-paste text-primary me-2"></i> <span class="suggested-title-text">{{ article.title }}</span>
+                        </div>
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <p class="text-muted fst-italic">Chưa có gợi ý nào được tải.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <footer class="text-center mt-5 py-3 bg-light">
+        <p class="mb-0 text-muted small">&copy; 2024-2025 Hệ thống Phân loại Chủ đề PhoBERT.</p>
+    </footer>
+
+    <script src="https://cdn.plot.ly/plotly-2.24.1.min.js" charset="utf-8"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+</body>
+</html>
